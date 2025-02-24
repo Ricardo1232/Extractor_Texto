@@ -1,82 +1,87 @@
-try:
-    import requests
-    from PIL import Image
-    from io import BytesIO
-except Exception as e:
-    print(e)
-    
-import concurrent.futures  
 import os
+import concurrent.futures
 import cv2
-from pytesseract import *
+from pytesseract import pytesseract
+from PIL import Image
+from io import BytesIO
+import requests
+
+from PyQt5.QtWidgets import (
+    QMainWindow, QWidget, QFrame, QPushButton, QLabel,
+    QListWidget, QSizePolicy, QSpacerItem, QVBoxLayout,
+    QHBoxLayout, QGridLayout, QGraphicsDropShadowEffect,
+    QApplication, QFileDialog, QListWidgetItem
+)
+from PyQt5.QtGui import QFont, QIcon, QPixmap, QColor, QDragEnterEvent, QDropEvent, QCursor
+from PyQt5.QtCore import Qt, QSize, QUrl, QMetaObject, QRect, QCoreApplication
+
+from ui_list_item import ListItem
+
+# Configure Tesseract path
 pytesseract.tesseract_cmd = r"C:/Program Files/Tesseract-OCR/tesseract.exe"
 
-# ------------------------------ Importacioes para la interfaz ------------------------------ #
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtWidgets import  QGraphicsDropShadowEffect, QApplication, QMainWindow
-from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QImage, QImageReader, QClipboard
-from PyQt5.QtCore import Qt, QSize, QMimeData, QUrl, QEvent, QEventLoop
-# ------------------------------ End Importacioes para la interfaz ------------------------------ #
-
-# ----- Clase list item ----- #
-from ui_list_item import ListItem
-# ----- End Clase list item ----- #
-
-# ------------------------------ Extractor ------------------------------ #   
-def extract(elem_actual):   
-    if elem_actual['link']:
-        try:
-            content_type = elem_actual['file'].headers.get('content-type')
-            file_extension = ''
-
-            if content_type:
-                if 'jpeg' in content_type:
-                    file_extension = '.jpg'
-                elif 'png' in content_type:
-                    file_extension = '.png'
-
-            filename = f"temp_image_{elem_actual['object'].id}{file_extension}"
-
-            with open(filename, 'wb') as f:
-                f.write(elem_actual['file'].content)
-
+def extract_text_from_image(image_data):
+    """Extract text from an image using OCR.
+    
+    Args:
+        image_data (dict): Dictionary containing image data and metadata
+            - link (bool): Whether the image is from a URL
+            - paste (bool): Whether the image is from clipboard
+            - file: Image file or response object
+            - object: Associated UI object
+            
+    Returns:
+        tuple: (extracted_text, image_data)
+    """
+    try:
+        if image_data['link']:
             try:
-                # image = Image.open(filename)
-                gray_image = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
-                _, th = cv2.threshold(gray_image, 138, 255, cv2.THRESH_BINARY)
-                text = pytesseract.image_to_string(th)
-            finally:
-                # image.close()
+                content_type = image_data['file'].headers.get('content-type')
+                file_extension = '.jpg' if 'jpeg' in content_type else '.png' if 'png' in content_type else ''
+                filename = f"temp_image_{image_data['object'].id}{file_extension}"
+                
+                with open(filename, 'wb') as f:
+                    f.write(image_data['file'].content)
+                    
+                text = process_image(filename)
                 os.remove(filename)
+                
+            except requests.exceptions.RequestException as e:
+                image_data['link'] = 'Error'
+                print(f"HTTP Request Error: {e}")
+                return None, image_data
+                
+        else:
+            filename = image_data['file']
+            text = process_image(filename)
             
-        except elem_actual['file'].exceptions.RequestException as e:
-            elem_actual['link'] = 'Error'
-            print(f"Error en la solicitud HTTP: {e}")
-            text = None 
-            
-    elif elem_actual['paste']:
-        try:
-            # image = Image.open(elem_actual['file'])
-            # text = pytesseract.image_to_string(image)
-            gray_image = cv2.imread(elem_actual['file'], cv2.IMREAD_GRAYSCALE)
-            _, th = cv2.threshold(gray_image, 138, 255, cv2.THRESH_BINARY)
-            text = pytesseract.image_to_string(th)
-            
-        finally:
-            # image.close()
-            os.remove(elem_actual['file'])
-    else:
-        # image = Image.open(elem_actual['file'])
-        # text = pytesseract.image_to_string(image)
-        gray_image = cv2.imread(elem_actual['file'], cv2.IMREAD_GRAYSCALE)
-        _, th = cv2.threshold(gray_image, 138, 255, cv2.THRESH_BINARY)
-        text = pytesseract.image_to_string(th)
-        
-    return text, elem_actual
-# ------------------------------ End Extractor ------------------------------ #   
+            if image_data['paste']:
+                os.remove(filename)
+                
+        return text, image_data
+    
+    except Exception as e:
+        print(f"Error processing image: {e}")
+        return None, image_data
 
-### ---/-/---/-/---/-/---/-/---/-/--- Interfaz principal ---/-/---/-/---/-/---/-/---/-/--- ###
-class Ui_MainWindow(object):
+def process_image(image_path):
+    """Process image for better OCR results.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        str: Extracted text from the image
+    """
+    gray_image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    _, threshold = cv2.threshold(gray_image, 138, 255, cv2.THRESH_BINARY)
+    return pytesseract.image_to_string(threshold)
+
+class MainWindow(QMainWindow):
+    """Main application window for the text extraction tool.
+    
+    This class handles the main UI setup and image processing functionality.
+    """
     def __init__(self):
         self.item_id = 0       
         self.image_previews = []
@@ -86,52 +91,52 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(900, 700)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(MainWindow.sizePolicy().hasHeightForWidth())
         MainWindow.setSizePolicy(sizePolicy)
-        MainWindow.setMinimumSize(QtCore.QSize(900, 700))
-        self.centralwidget = QtWidgets.QWidget(MainWindow)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        MainWindow.setMinimumSize(QSize(900, 700))
+        self.centralwidget = QWidget(MainWindow)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.centralwidget.sizePolicy().hasHeightForWidth())
         self.centralwidget.setSizePolicy(sizePolicy)
-        self.centralwidget.setMinimumSize(QtCore.QSize(900, 700))
+        self.centralwidget.setMinimumSize(QSize(900, 700))
         self.centralwidget.setObjectName("centralwidget")
-        self.gridLayout_2 = QtWidgets.QGridLayout(self.centralwidget)
+        self.gridLayout_2 = QGridLayout(self.centralwidget)
         self.gridLayout_2.setContentsMargins(0, 0, 0, 0)
         self.gridLayout_2.setObjectName("gridLayout_2")
-        self.frame = QtWidgets.QFrame(self.centralwidget)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        self.frame = QFrame(self.centralwidget)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.frame.sizePolicy().hasHeightForWidth())
         self.frame.setSizePolicy(sizePolicy)
-        self.frame.setMinimumSize(QtCore.QSize(900, 700))
-        self.frame.setBaseSize(QtCore.QSize(5, 0))
+        self.frame.setMinimumSize(QSize(900, 700))
+        self.frame.setBaseSize(QSize(5, 0))
         self.frame.setStyleSheet("background-color: qlineargradient(spread:pad, x1:0, y1:1, x2:1, y2:0, stop:0 rgba(146, 184, 181, 201), stop:1 rgba(255, 255, 255, 179))")
-        self.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame.setFrameShape(QFrame.StyledPanel)
+        self.frame.setFrameShadow(QFrame.Raised)
         self.frame.setObjectName("frame")
-        self.frame_sup = QtWidgets.QFrame(self.frame)
+        self.frame_sup = QFrame(self.frame)
         self.frame_sup.setEnabled(True)
-        self.frame_sup.setGeometry(QtCore.QRect(10, 10, 881, 60))
-        self.frame_sup.setMinimumSize(QtCore.QSize(881, 60))
-        self.frame_sup.setMaximumSize(QtCore.QSize(16777215, 60))
+        self.frame_sup.setGeometry(QRect(10, 10, 881, 60))
+        self.frame_sup.setMinimumSize(QSize(881, 60))
+        self.frame_sup.setMaximumSize(QSize(16777215, 60))
         self.frame_sup.setStyleSheet("background-color:qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, stop:0 rgba(255, 255, 255, 203), stop:1 rgba(228, 245, 243, 163));\n"
 "border-radius: 25px;\n"
 "")
-        self.frame_sup.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_sup.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_sup.setFrameShape(QFrame.StyledPanel)
+        self.frame_sup.setFrameShadow(QFrame.Raised)
         self.frame_sup.setObjectName("frame_sup")
-        self.horizontalLayout = QtWidgets.QHBoxLayout(self.frame_sup)
+        self.horizontalLayout = QHBoxLayout(self.frame_sup)
         self.horizontalLayout.setObjectName("horizontalLayout")
-        spacerItem = QtWidgets.QSpacerItem(293, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem = QSpacerItem(293, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout.addItem(spacerItem)
-        self.label = QtWidgets.QLabel(self.frame_sup)
-        font = QtGui.QFont()
+        self.label = QLabel(self.frame_sup)
+        font = QFont()
         font.setFamily("HoloLens MDL2 Assets")
         font.setPointSize(13)
         font.setBold(False)
@@ -142,47 +147,46 @@ class Ui_MainWindow(object):
         self.label.setStyleSheet("background-color: rgba(255, 255, 255, 0)")
         self.label.setObjectName("label")
         self.horizontalLayout.addWidget(self.label)
-        spacerItem1 = QtWidgets.QSpacerItem(199, 20, QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Minimum)
+        spacerItem1 = QSpacerItem(199, 20, QSizePolicy.Fixed, QSizePolicy.Minimum)
         self.horizontalLayout.addItem(spacerItem1)
-        self.btn_reolad = QtWidgets.QPushButton(self.frame_sup)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
+        self.btn_reolad = QPushButton(self.frame_sup)
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.btn_reolad.sizePolicy().hasHeightForWidth())
         self.btn_reolad.setSizePolicy(sizePolicy)
-        self.btn_reolad.setMinimumSize(QtCore.QSize(20, 20))
-        self.btn_reolad.setMaximumSize(QtCore.QSize(20, 20))
-        self.btn_reolad.setCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+        self.btn_reolad.setMinimumSize(QSize(20, 20))
+        self.btn_reolad.setMaximumSize(QSize(20, 20))
+        self.btn_reolad.setCursor(QCursor(Qt.ArrowCursor))
         self.btn_reolad.setStyleSheet("")
         self.btn_reolad.setText("")
-        icon = QtGui.QIcon()
-        icon.addPixmap(QtGui.QPixmap(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "reload.svg")), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon = QIcon()
+        icon.addPixmap(QPixmap(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "reload.svg")), QIcon.Normal, QIcon.Off)
         self.btn_reolad.setIcon(icon)
-        self.btn_reolad.setIconSize(QtCore.QSize(20, 20))
+        self.btn_reolad.setIconSize(QSize(20, 20))
         self.btn_reolad.setObjectName("btn_reolad")
         self.horizontalLayout.addWidget(self.btn_reolad)
-        spacerItem2 = QtWidgets.QSpacerItem(27, 20, QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Minimum)
+        spacerItem2 = QSpacerItem(27, 20, QSizePolicy.Fixed, QSizePolicy.Minimum)
         self.horizontalLayout.addItem(spacerItem2)
-        self.frame_inf = QtWidgets.QFrame(self.frame)
-        self.frame_inf.setGeometry(QtCore.QRect(10, 610, 881, 78))
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        self.frame_inf = QFrame(self.frame)
+        self.frame_inf.setGeometry(QRect(10, 610, 881, 78))
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.frame_inf.sizePolicy().hasHeightForWidth())
         self.frame_inf.setSizePolicy(sizePolicy)
-        self.frame_inf.setMinimumSize(QtCore.QSize(881, 78))
-        self.frame_inf.setMaximumSize(QtCore.QSize(16777215, 78))
-        self.frame_inf.setStyleSheet("background-color:rgba(243, 255, 255, 237);\n"
-"border-radius: 20px 20px 5px 5px;")
-        self.frame_inf.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_inf.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_inf.setMinimumSize(QSize(881, 78))
+        self.frame_inf.setMaximumSize(QSize(16777215, 78))
+        self.frame_inf.setStyleSheet("background-color:rgba(243, 255, 255, 237);\nborder-radius: 20px 20px 5px 5px;")
+        self.frame_inf.setFrameShape(QFrame.StyledPanel)
+        self.frame_inf.setFrameShadow(QFrame.Raised)
         self.frame_inf.setObjectName("frame_inf")
-        self.horizontalLayout_5 = QtWidgets.QHBoxLayout(self.frame_inf)
+        self.horizontalLayout_5 = QHBoxLayout(self.frame_inf)
         self.horizontalLayout_5.setObjectName("horizontalLayout_5")
-        spacerItem3 = QtWidgets.QSpacerItem(347, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem3 = QSpacerItem(347, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_5.addItem(spacerItem3)
-        self.btn_proc = QtWidgets.QPushButton(self.frame_inf)
-        font = QtGui.QFont()
+        self.btn_proc = QPushButton(self.frame_inf)
+        font = QFont()
         font.setFamily("HoloLens MDL2 Assets")
         font.setPointSize(13)
         font.setBold(False)
@@ -204,31 +208,31 @@ class Ui_MainWindow(object):
 "}")
         self.btn_proc.setObjectName("btn_proc")
         self.horizontalLayout_5.addWidget(self.btn_proc)
-        spacerItem4 = QtWidgets.QSpacerItem(346, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem4 = QSpacerItem(346, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_5.addItem(spacerItem4)
-        self.frame_mid = QtWidgets.QFrame(self.frame)
-        self.frame_mid.setGeometry(QtCore.QRect(10, 84, 881, 521))
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        self.frame_mid = QFrame(self.frame)
+        self.frame_mid.setGeometry(QRect(10, 84, 881, 521))
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.frame_mid.sizePolicy().hasHeightForWidth())
         self.frame_mid.setSizePolicy(sizePolicy)
-        self.frame_mid.setMinimumSize(QtCore.QSize(841, 521))
+        self.frame_mid.setMinimumSize(QSize(841, 521))
         self.frame_mid.setStyleSheet("background-color: rgb(255, 255, 255);\n"
 "\n"
 "border: 2px solid rgb(191, 224, 226);\n"
 "\n"
 "border-radius: 15px;\n"
 "")
-        self.frame_mid.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_mid.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_mid.setFrameShape(QFrame.StyledPanel)
+        self.frame_mid.setFrameShadow(QFrame.Raised)
         self.frame_mid.setObjectName("frame_mid")
         
         # Crear un QGraphicsDropShadowEffect
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(5) 
         shadow.setOffset(0, 0) 
-        shadow.setColor(QtGui.QColor(26, 44, 50, 191)) 
+        shadow.setColor(QColor(26, 44, 50, 191)) 
         self.frame_mid.setGraphicsEffect(shadow)
         
         # Evento drop
@@ -236,138 +240,138 @@ class Ui_MainWindow(object):
         self.frame_mid.dragEnterEvent = self.dragEnterEvent
         self.frame_mid.dropEvent = self.dropEvent
         
-        self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.frame_mid)
+        self.verticalLayout_2 = QVBoxLayout(self.frame_mid)
         self.verticalLayout_2.setContentsMargins(0, -1, 0, -1)
         self.verticalLayout_2.setSpacing(5)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
-        self.frame_elemnts = QtWidgets.QFrame(self.frame_mid)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        self.frame_elemnts = QFrame(self.frame_mid)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(14)
         sizePolicy.setVerticalStretch(14)
         sizePolicy.setHeightForWidth(self.frame_elemnts.sizePolicy().hasHeightForWidth())
         self.frame_elemnts.setSizePolicy(sizePolicy)
-        self.frame_elemnts.setMinimumSize(QtCore.QSize(859, 275))
-        self.frame_elemnts.setLayoutDirection(QtCore.Qt.LeftToRight)
+        self.frame_elemnts.setMinimumSize(QSize(859, 275))
+        self.frame_elemnts.setLayoutDirection(Qt.LeftToRight)
         self.frame_elemnts.setStyleSheet("border-top: unset;\n"
 "border-left: unset;\n"
 "border-right: unset;\n"
 "border-bottom: 5px solid rgba(242, 249, 249, 0.7);\n"
 "")
-        self.frame_elemnts.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_elemnts.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_elemnts.setFrameShape(QFrame.StyledPanel)
+        self.frame_elemnts.setFrameShadow(QFrame.Raised)
         self.frame_elemnts.setObjectName("frame_elemnts")
-        self.list_items = QtWidgets.QListWidget(self.frame_elemnts)
-        self.list_items.setGeometry(QtCore.QRect(10, 0, 860, 280))
-        self.list_items.setMinimumSize(QtCore.QSize(860, 280))
+        self.list_items = QListWidget(self.frame_elemnts)
+        self.list_items.setGeometry(QRect(10, 0, 860, 280))
+        self.list_items.setMinimumSize(QSize(860, 280))
         self.list_items.setStyleSheet("border: unset;\n"
 "border-radius: unset;")
         self.list_items.setObjectName("list_items")
         self.verticalLayout_2.addWidget(self.frame_elemnts)
-        self.frame_pad_info = QtWidgets.QFrame(self.frame_mid)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Preferred)
+        self.frame_pad_info = QFrame(self.frame_mid)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.frame_pad_info.sizePolicy().hasHeightForWidth())
         self.frame_pad_info.setSizePolicy(sizePolicy)
-        self.frame_pad_info.setMinimumSize(QtCore.QSize(859, 206))
-        self.frame_pad_info.setMaximumSize(QtCore.QSize(16777215, 206))
-        self.frame_pad_info.setSizeIncrement(QtCore.QSize(0, 0))
+        self.frame_pad_info.setMinimumSize(QSize(859, 206))
+        self.frame_pad_info.setMaximumSize(QSize(16777215, 206))
+        self.frame_pad_info.setSizeIncrement(QSize(0, 0))
         self.frame_pad_info.setStyleSheet("border: unset;")
-        self.frame_pad_info.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_pad_info.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_pad_info.setFrameShape(QFrame.StyledPanel)
+        self.frame_pad_info.setFrameShadow(QFrame.Raised)
         self.frame_pad_info.setObjectName("frame_pad_info")
-        self.verticalLayout = QtWidgets.QVBoxLayout(self.frame_pad_info)
+        self.verticalLayout = QVBoxLayout(self.frame_pad_info)
         self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout.setSpacing(0)
         self.verticalLayout.setObjectName("verticalLayout")
-        self.frame_pad_img = QtWidgets.QFrame(self.frame_pad_info)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        self.frame_pad_img = QFrame(self.frame_pad_info)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.frame_pad_img.sizePolicy().hasHeightForWidth())
         self.frame_pad_img.setSizePolicy(sizePolicy)
-        self.frame_pad_img.setMinimumSize(QtCore.QSize(859, 89))
-        self.frame_pad_img.setMaximumSize(QtCore.QSize(16777215, 89))
-        self.frame_pad_img.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_pad_img.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_pad_img.setMinimumSize(QSize(859, 89))
+        self.frame_pad_img.setMaximumSize(QSize(16777215, 89))
+        self.frame_pad_img.setFrameShape(QFrame.StyledPanel)
+        self.frame_pad_img.setFrameShadow(QFrame.Raised)
         self.frame_pad_img.setObjectName("frame_pad_img")
-        self.horizontalLayout_4 = QtWidgets.QHBoxLayout(self.frame_pad_img)
+        self.horizontalLayout_4 = QHBoxLayout(self.frame_pad_img)
         self.horizontalLayout_4.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout_4.setSpacing(0)
         self.horizontalLayout_4.setObjectName("horizontalLayout_4")
-        spacerItem5 = QtWidgets.QSpacerItem(374, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem5 = QSpacerItem(374, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_4.addItem(spacerItem5)
-        self.label_img = QtWidgets.QLabel(self.frame_pad_img)
+        self.label_img = QLabel(self.frame_pad_img)
         self.label_img.setEnabled(True)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        sizePolicy = QSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.MinimumExpanding)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.label_img.sizePolicy().hasHeightForWidth())
         self.label_img.setSizePolicy(sizePolicy)
-        self.label_img.setMinimumSize(QtCore.QSize(123, 102))
-        self.label_img.setMaximumSize(QtCore.QSize(123, 102))
-        self.label_img.setSizeIncrement(QtCore.QSize(0, 0))
-        self.label_img.setBaseSize(QtCore.QSize(0, 0))
-        font = QtGui.QFont()
+        self.label_img.setMinimumSize(QSize(123, 102))
+        self.label_img.setMaximumSize(QSize(123, 102))
+        self.label_img.setSizeIncrement(QSize(0, 0))
+        self.label_img.setBaseSize(QSize(0, 0))
+        font = QFont()
         font.setFamily("HoloLens MDL2 Assets")
         font.setPointSize(8)
         self.label_img.setFont(font)
         self.label_img.setStyleSheet("border: unset;")
-        self.label_img.setFrameShadow(QtWidgets.QFrame.Plain)
+        self.label_img.setFrameShadow(QFrame.Plain)
         self.label_img.setText("")
-        self.label_img.setPixmap(QtGui.QPixmap(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "tool-box-image.svg")))
+        self.label_img.setPixmap(QPixmap(os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "tool-box-image.svg")))
         self.label_img.setScaledContents(True)
-        self.label_img.setAlignment(QtCore.Qt.AlignCenter)
+        self.label_img.setAlignment(Qt.AlignCenter)
         self.label_img.setObjectName("label_img")
         self.horizontalLayout_4.addWidget(self.label_img)
-        spacerItem6 = QtWidgets.QSpacerItem(374, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem6 = QSpacerItem(374, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_4.addItem(spacerItem6)
         self.verticalLayout.addWidget(self.frame_pad_img)
-        self.frame_inf_2 = QtWidgets.QFrame(self.frame_pad_info)
-        self.frame_inf_2.setMinimumSize(QtCore.QSize(859, 38))
-        self.frame_inf_2.setMaximumSize(QtCore.QSize(16777215, 38))
-        self.frame_inf_2.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_inf_2.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_inf_2 = QFrame(self.frame_pad_info)
+        self.frame_inf_2.setMinimumSize(QSize(859, 38))
+        self.frame_inf_2.setMaximumSize(QSize(16777215, 38))
+        self.frame_inf_2.setFrameShape(QFrame.StyledPanel)
+        self.frame_inf_2.setFrameShadow(QFrame.Raised)
         self.frame_inf_2.setObjectName("frame_inf_2")
-        self.horizontalLayout_2 = QtWidgets.QHBoxLayout(self.frame_inf_2)
+        self.horizontalLayout_2 = QHBoxLayout(self.frame_inf_2)
         self.horizontalLayout_2.setContentsMargins(0, 0, 0, 0)
         self.horizontalLayout_2.setSpacing(0)
         self.horizontalLayout_2.setObjectName("horizontalLayout_2")
-        spacerItem7 = QtWidgets.QSpacerItem(256, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem7 = QSpacerItem(256, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem7)
-        self.label_info = QtWidgets.QLabel(self.frame_inf_2)
-        font = QtGui.QFont()
+        self.label_info = QLabel(self.frame_inf_2)
+        font = QFont()
         font.setFamily("HoloLens MDL2 Assets")
         font.setPointSize(14)
         self.label_info.setFont(font)
         self.label_info.setStyleSheet("border: unset;")
         self.label_info.setObjectName("label_info")
         self.horizontalLayout_2.addWidget(self.label_info)
-        spacerItem8 = QtWidgets.QSpacerItem(256, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem8 = QSpacerItem(256, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_2.addItem(spacerItem8)
         self.verticalLayout.addWidget(self.frame_inf_2)
-        self.frame_pad_cargar = QtWidgets.QFrame(self.frame_pad_info)
-        self.frame_pad_cargar.setMinimumSize(QtCore.QSize(859, 52))
-        self.frame_pad_cargar.setMaximumSize(QtCore.QSize(16777215, 52))
+        self.frame_pad_cargar = QFrame(self.frame_pad_info)
+        self.frame_pad_cargar.setMinimumSize(QSize(859, 52))
+        self.frame_pad_cargar.setMaximumSize(QSize(16777215, 52))
         self.frame_pad_cargar.setStyleSheet("")
-        self.frame_pad_cargar.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame_pad_cargar.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.frame_pad_cargar.setFrameShape(QFrame.StyledPanel)
+        self.frame_pad_cargar.setFrameShadow(QFrame.Raised)
         self.frame_pad_cargar.setObjectName("frame_pad_cargar")
-        self.horizontalLayout_3 = QtWidgets.QHBoxLayout(self.frame_pad_cargar)
+        self.horizontalLayout_3 = QHBoxLayout(self.frame_pad_cargar)
         self.horizontalLayout_3.setContentsMargins(0, -1, 0, -1)
         self.horizontalLayout_3.setSpacing(0)
         self.horizontalLayout_3.setObjectName("horizontalLayout_3")
-        spacerItem9 = QtWidgets.QSpacerItem(386, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem9 = QSpacerItem(386, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_3.addItem(spacerItem9)
-        self.btn_cargar = QtWidgets.QPushButton(self.frame_pad_cargar)
-        sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        self.btn_cargar = QPushButton(self.frame_pad_cargar)
+        sizePolicy = QSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
         sizePolicy.setHeightForWidth(self.btn_cargar.sizePolicy().hasHeightForWidth())
         self.btn_cargar.setSizePolicy(sizePolicy)
-        self.btn_cargar.setMinimumSize(QtCore.QSize(100, 40))
-        self.btn_cargar.setMaximumSize(QtCore.QSize(100, 50))
-        font = QtGui.QFont()
+        self.btn_cargar.setMinimumSize(QSize(100, 40))
+        self.btn_cargar.setMaximumSize(QSize(100, 50))
+        font = QFont()
         font.setFamily("HoloLens MDL2 Assets")
         font.setPointSize(12)
         font.setBold(False)
@@ -392,7 +396,7 @@ class Ui_MainWindow(object):
 "     ")
         self.btn_cargar.setObjectName("btn_cargar")
         self.horizontalLayout_3.addWidget(self.btn_cargar)
-        spacerItem10 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        spacerItem10 = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.horizontalLayout_3.addItem(spacerItem10)
         self.verticalLayout.addWidget(self.frame_pad_cargar)
         self.verticalLayout_2.addWidget(self.frame_pad_info)
@@ -400,7 +404,7 @@ class Ui_MainWindow(object):
         MainWindow.setCentralWidget(self.centralwidget)
 
         self.retranslateUi(MainWindow)
-        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+        QMetaObject.connectSlotsByName(MainWindow)
         
         self.setup_key_shortcuts()
         MainWindow.keyPressEvent = self.load_image_from_clipboard
@@ -415,7 +419,7 @@ class Ui_MainWindow(object):
         self.btn_proc.clicked.connect(lambda: self.procesar_imagen())
     # ----------------------------- End Botones ----------------------------- #
     
-    # ----------------------------- Limpiar ----------------------------- #
+    # ----------------------------- Limpiar ----------------------------- #   
     def recargar(self):
         self.list_items.clear()
         self.item_id = 0    
@@ -431,7 +435,7 @@ class Ui_MainWindow(object):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
             for elem_actual in self.elementos_list:
-                future = executor.submit(extract, elem_actual)
+                future = executor.submit(extract_text_from_image, elem_actual)
                 futures.append(future)
             
             for future in concurrent.futures.as_completed(futures):
@@ -456,7 +460,7 @@ class Ui_MainWindow(object):
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(5) 
         shadow.setOffset(0, 0)
-        shadow.setColor(QtGui.QColor(26, 44, 50, 191))
+        shadow.setColor(QColor(26, 44, 50, 191))
         self.btn_reolad.setGraphicsEffect(shadow)
     
     def remove_shadow_effect(self):
@@ -472,7 +476,7 @@ class Ui_MainWindow(object):
 
         if is_url:
             try:
-                pixmap = QtGui.QPixmap()
+                pixmap = QPixmap()
                 pixmap.loadFromData(file_name.content)
                 elemento.nomb_img.setText(os.path.basename(file_name.url))
             except Exception as e:
@@ -485,13 +489,13 @@ class Ui_MainWindow(object):
                 file_name = custom_filename
                 
             elemento.nomb_img.setText(os.path.basename(file_name))
-            pixmap = QtGui.QPixmap(file_name)
+            pixmap = QPixmap(file_name)
             
         if pixmap is not None:
             pixmap = pixmap.scaled(250, 90, Qt.KeepAspectRatio)
             elemento.info_img.setPixmap(pixmap)
     
-        item = QtWidgets.QListWidgetItem()
+        item = QListWidgetItem()
         item.setSizeHint(elemento.sizeHint())
         self.list_items.addItem(item)
         self.list_items.setItemWidget(item, elemento)
@@ -531,9 +535,9 @@ class Ui_MainWindow(object):
 
     # ----------------------------- Explorador de archivos ----------------------------- #   
     def load_image_from_file_dialog(self):
-        options = QtWidgets.QFileDialog.Options()
-        options |= QtWidgets.QFileDialog.ReadOnly
-        file_name, _ = QtWidgets.QFileDialog.getOpenFileName(None, "Cargar imagen", "", "Images (*.png *.jpg *.jpeg *.bmp)", options=options)
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly
+        file_name, _ = QFileDialog.getOpenFileName(None, "Cargar imagen", "", "Images (*.png *.jpg *.jpeg *.bmp)", options=options)
         if file_name:
             return self.load_image(file_name)
     # ----------------------------- End Explorador de archivos ----------------------------- # 
@@ -572,10 +576,10 @@ class Ui_MainWindow(object):
             error_element.verticalLayout.setContentsMargins(2, 2, 2, 2)
             error_element.nomb_img.setText("Error")
             error_element.info_text.setText("No se pudo acceder a la imagen en la URL especificada. Asegúrate de que la URL sea válida y que tengas una conexión a Internet activa.")
-            pixmap = QtGui.QPixmap("../resources/question.svg")
+            pixmap = QPixmap("../resources/question.svg")
             pixmap = pixmap.scaled(250, 90, Qt.KeepAspectRatio)
             error_element.info_img.setPixmap(pixmap)
-            item = QtWidgets.QListWidgetItem()
+            item = QListWidgetItem()
             item.setSizeHint(error_element.sizeHint())
             self.list_items.addItem(item)
             self.list_items.setItemWidget(item, error_element)        
@@ -583,7 +587,7 @@ class Ui_MainWindow(object):
     # ----------------------------- End Verificar url img ----------------------------- # 
     
     def retranslateUi(self, MainWindow):
-        _translate = QtCore.QCoreApplication.translate
+        _translate = QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "Extractor de texto"))
         self.label.setText(_translate("MainWindow", "Coloque la imagen para extraer el texto"))
         self.btn_proc.setText(_translate("MainWindow", "Procesar imagen"))
@@ -593,9 +597,23 @@ class Ui_MainWindow(object):
 
 if __name__ == "__main__":      
     import sys
-    app = QtWidgets.QApplication(sys.argv)
-    MainWindow = QtWidgets.QMainWindow()
-    ui = Ui_MainWindow()
-    ui.setupUi(MainWindow)
-    MainWindow.show()
-    sys.exit(app.exec_())
+    class TextExtractorApp:
+        def __init__(self):
+            self.app = QApplication(sys.argv)
+            self.main_window = QMainWindow()
+            self.ui = MainWindow()
+            self.ui.setupUi(self.main_window)
+        def run(self):
+            try:
+                self.main_window.show()
+                return self.app.exec_()
+            except Exception as e:
+                print(f"Error running application: {e}")
+                return 1
+            finally:
+                # Cleanup resources
+                self.app.quit()
+    if __name__ == "__main__":
+        import sys
+        app = TextExtractorApp()
+        sys.exit(app.run())
