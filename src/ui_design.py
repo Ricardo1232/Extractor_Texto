@@ -20,7 +20,7 @@ from ui_list_item import ListItem
 # Configure Tesseract path
 pytesseract.tesseract_cmd = r"C:/Program Files/Tesseract-OCR/tesseract.exe"
 
-def extract_text_from_image(image_data):
+def extract_text_from_image(image_data: dict) -> tuple[str | None, dict]:
     """Extract text from an image using OCR.
     
     Args:
@@ -31,7 +31,7 @@ def extract_text_from_image(image_data):
             - object: Associated UI object
             
     Returns:
-        tuple: (extracted_text, image_data)
+        tuple[str | None, dict]: A tuple containing the extracted text (or None if failed) and the image data dictionary
     """
     try:
         if image_data['link']:
@@ -64,7 +64,7 @@ def extract_text_from_image(image_data):
         print(f"Error processing image: {e}")
         return None, image_data
 
-def process_image(image_path):
+def process_image(image_path: str) -> str:
     """Process image for better OCR results.
     
     Args:
@@ -410,27 +410,26 @@ class MainWindow(QMainWindow):
         MainWindow.keyPressEvent = self.load_image_from_clipboard
         
     # ----------------------------- Botones ----------------------------- #   
-    def setup_key_shortcuts(self):  
+    def setup_key_shortcuts(self) -> None:  
+        """Set up keyboard shortcuts and button connections."""
         self.btn_reolad.pressed.connect(lambda: self.apply_shadow_effect())
         self.btn_reolad.released.connect(lambda: self.remove_shadow_effect())
         self.btn_reolad.clicked.connect(lambda: self.recargar())
         
         self.btn_cargar.clicked.connect(lambda: self.load_image_from_file_dialog())
         self.btn_proc.clicked.connect(lambda: self.procesar_imagen())
-    # ----------------------------- End Botones ----------------------------- #
-    
-    # ----------------------------- Limpiar ----------------------------- #   
-    def recargar(self):
+
+    def recargar(self) -> None:
+        """Clear all items and reset the interface state."""
         self.list_items.clear()
         self.item_id = 0    
         for elem_actual in self.elementos_list:
                 del elem_actual
         self.elementos_list = []
         self.is_proc = False
-    # ----------------------------- End Limpiar ----------------------------- #  
-     
-    # ----------------------------- Procesar ----------------------------- #   
-    def procesar_imagen(self):
+
+    def procesar_imagen(self) -> None:
+        """Process all loaded images using parallel execution."""
         self.is_proc = True
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
@@ -440,40 +439,47 @@ class MainWindow(QMainWindow):
             
             for future in concurrent.futures.as_completed(futures):
                 text, elem_actual = future.result()
-                self.show_text(text,elem_actual)          
-    # ----------------------------- End Procesar ----------------------------- #   
-    
-    # ----------------------------- Mostrar texto ----------------------------- #    
-    def show_text(self, text, elem_actual):
+                self.show_text(text, elem_actual)
+
+    def show_text(self, text: str | None, elem_actual: dict) -> None:
+        """Display extracted text in the UI.
+        
+        Args:
+            text (str | None): The extracted text or None if extraction failed
+            elem_actual (dict): Dictionary containing the UI element data
+        """
         if text:
-            elem_actual['object'].info_text.setText(text)
-            elem_actual['object'].info_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            elem_actual['object'].btn_copy.setEnabled(True)
+            elem_actual['object'].set_text(text)
         elif elem_actual['link'] == 'Error': 
-            elem_actual['object'].info_text.setText("No se pudo acceder a la imagen en la URL especificada. Asegúrate de que la URL sea válida y que tengas una conexión a Internet activa.")
+            elem_actual['object'].set_text("No se pudo acceder a la imagen en la URL especificada. Asegúrate de que la URL sea válida y que tengas una conexión a Internet activa.")
         else:
-            elem_actual['object'].info_text.setText("No hay texto que extraer.")
-    # ----------------------------- End Mostrar texto ----------------------------- #    
-            
-    # ----------------------------- Sombra de reload y copy ----------------------------- #   
-    def apply_shadow_effect(self):
+            elem_actual['object'].set_text("No hay texto que extraer.")
+
+    def apply_shadow_effect(self) -> None:
+        """Apply shadow effect to the reload button."""
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(5) 
         shadow.setOffset(0, 0)
         shadow.setColor(QColor(26, 44, 50, 191))
         self.btn_reolad.setGraphicsEffect(shadow)
-    
-    def remove_shadow_effect(self):
+
+    def remove_shadow_effect(self) -> None:
+        """Remove shadow effect from the reload button."""
         self.btn_reolad.setGraphicsEffect(None)
-    # ----------------------------- End Sombra de reload y copy ----------------------------- #   
-           
-    # ----------------------------- Cargar elemento en interfaz ----------------------------- #   
-    def load_in_list(self, file_name=None, is_url=False, is_paste=False):
+
+    def load_in_list(self, file_name: str | None = None, is_url: bool = False, is_paste: bool = False) -> None:
+        """Add a new image item to the list.
+        
+        Args:
+            file_name (str | None): Path to the image file or URL response
+            is_url (bool): Whether the image is from a URL
+            is_paste (bool): Whether the image is from clipboard
+        """
         self.item_id += 1
             
         elemento = ListItem(item_id=self.item_id)
         elemento.verticalLayout.setContentsMargins(2, 2, 2, 2)
-
+        
         if is_url:
             try:
                 pixmap = QPixmap()
@@ -532,7 +538,7 @@ class MainWindow(QMainWindow):
                image = clipboard.image()
                self.load_image(image, is_paste=True)
     # ----------------------------- End Portapapeles ----------------------------- #   
-
+    
     # ----------------------------- Explorador de archivos ----------------------------- #   
     def load_image_from_file_dialog(self):
         options = QFileDialog.Options()
